@@ -15,6 +15,8 @@ for row in range(rows):
         if place == 1:
             #6 pieces
             array_2d[row][col] = random.randint(1, 6)
+        else:
+            array_2d[row][col] = ""
         if array_2d[row][col] == 1:
             array_2d[row][col] = "King"
         if array_2d[row][col] == 2:
