@@ -77,22 +77,23 @@ class ResNet18(nn.Module):
         out = self.fc(out)
         return out
 
+if __name__ == "__main__":
 
-# Define model, criterion, and optimizer
-model = ResNet18()
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    # Define model, criterion, and optimizer
+    model = ResNet18()
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
-# Training Loop
-for epoch in range(10):
-    running_loss = 0.0
-    for i, data in enumerate(trainloader, 0):  # Make sure trainloader is defined
-        inputs, labels = data
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-        running_loss += loss.item()
+# # Training Loop
+# for epoch in range(10):
+#     running_loss = 0.0
+#     for i, data in enumerate(trainloader, 0):  # Make sure trainloader is defined
+#         inputs, labels = data
+#         optimizer.zero_grad()
+#         outputs = model(inputs)
+#         loss = criterion(outputs, labels)
+#         loss.backward()
+#         optimizer.step()
+#         running_loss += loss.item()
 
-    print(f'Epoch {epoch + 1}, Loss: {running_loss / len(trainloader)}')
+#     print(f'Epoch {epoch + 1}, Loss: {running_loss / len(trainloader)}')
