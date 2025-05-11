@@ -147,9 +147,9 @@ def find_corners(cfg: dict, img: np.ndarray) -> np.ndarray:
     all_intersection_points = _get_intersection_points(horizontal_lines, vertical_lines)
 
     ############################################################################
-    plot_lines_and_intersections(
-        img, horizontal_lines, vertical_lines, all_intersection_points
-    )
+    # plot_lines_and_intersections(
+    #     img, horizontal_lines, vertical_lines, all_intersection_points
+    # )
     ############################################################################
 
     best_num_inliers = 0
