@@ -9,6 +9,7 @@ from torchvision import transforms
 import torch.nn as nn
 import torch
 from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
 
 
 # Map piece names to integer labels
@@ -74,7 +75,7 @@ class ChessSquareDataset(Dataset):
             try:
                 corners = detect_corners.find_corners(utils.cfg, image)
                 break
-            except detect_corners.RecognitionException:
+            except (detect_corners.RecognitionException, ValueError):
                 attempt += 1
                 angle = -45 + attempt * 10
                 image = utils.rotate_image(image, angle)
@@ -127,13 +128,12 @@ def main():
     annotations = utils.load_annotations("annotations.json")
     board_lookup = utils.build_board_lookup(annotations)
     paths = paths[:50]
-    # === Step 1: Split dataset ===
-    from sklearn.model_selection import train_test_split
 
+    # Split dataset
     train_paths, temp_paths = train_test_split(paths, test_size=0.3, random_state=42)
     val_paths, test_paths = train_test_split(temp_paths, test_size=0.5, random_state=42)
 
-    # === Step 2: Define transform and device ===
+    # Define transform and device
     transform = transforms.Compose(
         [
             transforms.ToPILImage(),
@@ -146,7 +146,7 @@ def main():
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # === Step 3: Create datasets and loaders ===
+    # Step 3: Create datasets and loaders
     train_dataset = ChessSquareDataset(train_paths, annotations, transform=transform)
     val_dataset = ChessSquareDataset(val_paths, annotations, transform=transform)
     test_dataset = ChessSquareDataset(test_paths, annotations, transform=transform)
@@ -155,12 +155,12 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=64)
     test_loader = DataLoader(test_dataset, batch_size=64)
 
-    # === Step 4: Initialize model, loss, optimizer ===
+    # Initialize model, loss, optimizer
     model = resnet18.ResNet18(num_classes=13).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
-    # === Step 5: Train model ===
+    # Train model
     for epoch in range(10):
         model.train()
         running_loss = 0.0
@@ -178,7 +178,7 @@ def main():
         avg_loss = running_loss / len(train_loader)
         print(f"Epoch {epoch + 1}: Train Loss = {avg_loss:.4f}")
 
-        # === Optional: Validation loss ===
+        # Validation loss
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
@@ -191,6 +191,7 @@ def main():
         print(f"Epoch {epoch + 1}: Validation Loss = {val_loss / len(val_loader):.4f}")
 
     accuracies = []
+    perfect_boards = 0
     for path in test_paths:
         image = cv2.imread(path)
         image_name = os.path.basename(path)
@@ -198,17 +199,32 @@ def main():
         pred_board = predict_board(
             model, image, annotations, device, transform, label_inv_map
         )
-        acc = evaluate_board_accuracy(pred_board, true_board)
+        acc, is_perfect = evaluate_board_accuracy(pred_board, true_board)
         print(f"{image_name}: Accuracy = {acc:.2%}")
         accuracies.append(acc)
+        perfect_boards += int(is_perfect)
 
     print(f"Average board accuracy: {np.mean(accuracies):.2%}")
+    print(
+        f"Perfect Boards (All 64 squares correct): {perfect_boards}/{len(accuracies)} = {100 * perfect_boards / len(accuracies):.2f}%"
+    )
 
 
 def predict_board(model, image, annotations, device, transform, label_inv_map):
     model.eval()
     with torch.no_grad():
-        corners = detect_corners.find_corners(utils.cfg, image)
+        attempt = 0
+        while attempt < 10:
+            try:
+                corners = detect_corners.find_corners(utils.cfg, image)
+                break
+            except (detect_corners.RecognitionException, ValueError):
+                attempt += 1
+                angle = -45 + attempt * 10
+                image = utils.rotate_image(image, angle)
+        else:
+            raise RuntimeError("Corner detection failed after 10 attempts")
+
         warped = utils.warp_board(image, corners)
         warped = utils.correct_board_orientation(warped)
         squares = utils.split_board_into_squares(warped)
@@ -230,13 +246,17 @@ def predict_board(model, image, annotations, device, transform, label_inv_map):
 def evaluate_board_accuracy(predicted_board, true_board):
     total = 0
     correct = 0
+    all_match = True
     for square, label in predicted_board.items():
         if square not in true_board:
             continue
         total += 1
         if label == true_board[square]:
             correct += 1
-    return correct / total if total > 0 else 0
+        else:
+            all_match = False
+    acc = correct / total if total > 0 else 0
+    return acc, all_match
 
 
 main()

@@ -373,6 +373,7 @@ def get_intersection_point(
 
 
 def _choose_from_range(upper_bound: int, n: int = 2):
+    # n = min(n, upper_bound)
     return np.sort(
         np.random.choice(np.arange(upper_bound), (n,), replace=False), axis=-1
     )
