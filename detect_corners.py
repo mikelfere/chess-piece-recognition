@@ -134,7 +134,8 @@ def find_corners(cfg: dict, img: np.ndarray) -> np.ndarray:
     edges = _detect_edges(cfg["EDGE_DETECTION"], gray)
     lines = _detect_lines(cfg, edges)
     if lines.shape[0] > 400:
-        raise ChessboardNotLocatedException("too many lines in the image")
+        # raise ChessboardNotLocatedException("too many lines in the image")
+        return None
     all_horizontal_lines, all_vertical_lines = _cluster_horizontal_and_vertical_lines(
         lines
     )
@@ -143,6 +144,9 @@ def find_corners(cfg: dict, img: np.ndarray) -> np.ndarray:
         all_horizontal_lines, all_vertical_lines
     )
     vertical_lines = _eliminate_similar_lines(all_vertical_lines, all_horizontal_lines)
+
+    if len(horizontal_lines) < 2 or len(vertical_lines) < 2:
+        return None  # Not enough lines to proceed
 
     all_intersection_points = _get_intersection_points(horizontal_lines, vertical_lines)
 
@@ -188,7 +192,8 @@ def find_corners(cfg: dict, img: np.ndarray) -> np.ndarray:
                 best_configuration = configuration
         iterations += 1
         if iterations > 10000:
-            raise ChessboardNotLocatedException("RANSAC produced no viable results")
+            return None
+            # raise ChessboardNotLocatedException("RANSAC produced no viable results")
 
     # Retrieve best configuration
     (
@@ -374,6 +379,8 @@ def get_intersection_point(
 
 def _choose_from_range(upper_bound: int, n: int = 2):
     # n = min(n, upper_bound)
+    # if upper_bound < n:
+    #     return None, None
     return np.sort(
         np.random.choice(np.arange(upper_bound), (n,), replace=False), axis=-1
     )
