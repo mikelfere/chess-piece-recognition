@@ -2,7 +2,7 @@ import utils
 import resnet18
 import numpy as np
 import detect_corners
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import cv2
 import os
 from torchvision import transforms
@@ -10,8 +10,8 @@ import torch.nn as nn
 import torch
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import multiprocessing
+# from concurrent.futures import ProcessPoolExecutor, as_completed
+# import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 import json
 
@@ -60,7 +60,7 @@ class ChessSquareDataset(Dataset):
 
         # Generate (square image, label) pairs across all images
         self.samples = []
-        i = 0
+        # i = 0
 
         # num_workers = 3 # Use N-1 cores
         # with ProcessPoolExecutor(max_workers=num_workers) as executor:
