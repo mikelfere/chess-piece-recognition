@@ -2,10 +2,10 @@ import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import torch
+# import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
+# import torch.nn.functional as F
 
 
 # Basic Block Definition

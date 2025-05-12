@@ -79,11 +79,13 @@ def warp_board(original_img, corners):
     maxHeight = int(max(heightA, heightB))
 
     if maxWidth > 4000 or maxHeight > 4000:
-        raise ValueError(
-            f"Suspend warp: suspiciously large dimensions ({maxWidth}x{maxHeight})"
-        )
+        return None
+        # raise ValueError(
+        #     f"Suspend warp: suspiciously large dimensions ({maxWidth}x{maxHeight})"
+        # )
     if maxWidth < 100 or maxHeight < 100:
-        raise ValueError(f"Invalid warp: too small dimensions ({maxWidth}x{maxHeight})")
+        return None
+        # raise ValueError(f"Invalid warp: too small dimensions ({maxWidth}x{maxHeight})")
 
     side_length = min(original_img.shape[:2])  # ensure fits in image
     side_length = min(side_length, max(maxWidth, maxHeight))
