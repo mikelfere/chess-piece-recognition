@@ -2,6 +2,7 @@ import utils
 import resnet18
 import numpy as np
 import detect_corners
+
 # import matplotlib.pyplot as plt
 import cv2
 import os
@@ -10,6 +11,7 @@ import torch.nn as nn
 import torch
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
+
 # from concurrent.futures import ProcessPoolExecutor, as_completed
 # import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
@@ -50,107 +52,84 @@ label_inv_map = {
 
 
 class ChessSquareDataset(Dataset):
-    def __init__(self, image_paths, annotations, transform=None, max_attempts=4):
+    def __init__(
+        self,
+        image_paths,
+        annotations,
+        transform=None,
+        max_attempts=4,
+        use_cached_only=False,
+    ):
         self.image_paths = image_paths
         self.annotations = annotations
         self.board_lookup = utils.build_board_lookup(annotations)
         self.transform = transform
         self.max_attempts = max_attempts
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.use_cached_only = use_cached_only
 
         # Generate (square image, label) pairs across all images
         self.samples = []
-        # i = 0
-
-        # num_workers = 3 # Use N-1 cores
-        # with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        #     futures = [
-        #         executor.submit(
-        #             process_image,
-        #             path,
-        #             self.annotations,
-        #             self.board_lookup,
-        #             self.transform,
-        #             self.max_attempts,
-        #         )
-        #         for path in self.image_paths
-        #     ]
-
-        # for f in as_completed(futures):
-        #     result = f.result()
-        #     if result:
-        #         self.samples.extend(result)
 
         self.samples = safe_parallel_load(
-            self.image_paths, self.annotations, self.board_lookup, self.transform
+            self.image_paths,
+            self.annotations,
+            self.board_lookup,
+            self.transform,
+            self.use_cached_only,
         )
 
-        # for img_path in image_paths:
-        #     # try:
-        #     # print(f"i{i}")
-        #     i += 1
-        #     board_samples = self._process_image(img_path)
-        #     if board_samples is None:
-        #         continue
-        #     self.samples.extend(board_samples)
-        #     # except Exception as e:
-        # print(f"[Warning] Skipping {img_path}: {e}")
+    # def _process_image(self, img_path):
+    #     # Load and rotate image to find corners
+    #     image = cv2.imread(img_path)
+    #     if image is None:
+    #         return None
 
-    def _process_image(self, img_path):
-        # Load and rotate image to find corners
-        image = cv2.imread(img_path)
-        if image is None:
-            return None
-            # raise ValueError(f"Image at path {img_path} not found or unreadable")
+    #     attempt = 0
+    #     while attempt < self.max_attempts:
+    #         corners = detect_corners.find_corners(utils.cfg, image)
 
-        attempt = 0
-        while attempt < self.max_attempts:
-            corners = detect_corners.find_corners(utils.cfg, image)
+    #         if corners is None or len(corners) != 4:
+    #             attempt += 1
+    #             angle = -22.5 + attempt * 15
+    #             image = utils.rotate_image(image, angle)
+    #         else:
+    #             break
+    #     else:
+    #         return None
 
-            if corners is None or len(corners) != 4:
-                attempt += 1
-                angle = -22.5 + attempt * 15
-                image = utils.rotate_image(image, angle)
-            else:
-                break
-        else:
-            return None
-            # raise RuntimeError(
-            #     f"Corner detection failed after {self.max_attempts} attempts"
-            # )
+    #     # Warp and split board
+    #     warped = utils.warp_board(image, corners)
+    #     if warped is None:
+    #         return None
+    #     warped = utils.correct_board_orientation(warped)
+    #     squares = utils.split_board_into_squares(
+    #         warped
+    #     )  # Returns list of 64 square images
 
-        # Warp and split board
-        warped = utils.warp_board(image, corners)
-        if warped is None:
-            return None
-        warped = utils.correct_board_orientation(warped)
-        squares = utils.split_board_into_squares(
-            warped
-        )  # Returns list of 64 square images
+    #     # Get labels
+    #     image_name = os.path.basename(img_path)
+    #     board = utils.get_board_for_image(
+    #         image_name, self.annotations, self.board_lookup
+    #     )
+    #     square_labels = utils.complete_board_labels(
+    #         board
+    #     )  # Dict like {'a1': 'white_rook', ...}
 
-        # Get labels
-        image_name = os.path.basename(img_path)
-        board = utils.get_board_for_image(
-            image_name, self.annotations, self.board_lookup
-        )
-        square_labels = utils.complete_board_labels(
-            board
-        )  # Dict like {'a1': 'white_rook', ...}
+    #     # Square order: a8 to h8, ..., a1 to h1 (top to bottom, left to right)
+    #     square_keys = utils.get_square_keys_in_order()  # Assumes top-left is a8
 
-        # Square order: a8 to h8, ..., a1 to h1 (top to bottom, left to right)
-        square_keys = utils.get_square_keys_in_order()  # Assumes top-left is a8
+    #     image_label_pairs = []
+    #     for square_img, key in zip(squares, square_keys):
+    #         label_name = square_labels.get(key, "empty")
+    #         label = label_map[label_name]
+    #         if self.transform:
+    #             square_img = self.transform(square_img)
+    #         else:
+    #             square_img = transforms.ToTensor()(square_img)
+    #         image_label_pairs.append((square_img, label))
 
-        image_label_pairs = []
-        for square_img, key in zip(squares, square_keys):
-            label_name = square_labels.get(key, "empty")
-            label = label_map[label_name]
-            if self.transform:
-                square_img = self.transform(square_img)
-            else:
-                square_img = transforms.ToTensor()(square_img)
-            image_label_pairs.append((square_img, label))
-
-        return image_label_pairs
+    #     return image_label_pairs
 
     def __len__(self):
         return len(self.samples)
@@ -182,7 +161,7 @@ def save_squares_and_labels(output_root, image_name, squares, labels):
         json.dump(label_dict, f)
 
 
-def safe_parallel_load(paths, annotations, board_lookup, transform):
+def safe_parallel_load(paths, annotations, board_lookup, transform, use_cached_only):
     from functools import partial
     from tqdm import tqdm
 
@@ -191,6 +170,7 @@ def safe_parallel_load(paths, annotations, board_lookup, transform):
         annotations=annotations,
         board_lookup=board_lookup,
         transform=transform,
+        use_cached_only=use_cached_only,
     )
 
     results = []
@@ -207,8 +187,14 @@ def safe_parallel_load(paths, annotations, board_lookup, transform):
     return results
 
 
-def process_image(img_path, annotations, board_lookup, transform, max_attempts=4):
-    
+def process_image(
+    img_path,
+    annotations,
+    board_lookup,
+    transform,
+    max_attempts=4,
+    use_cached_only=False,
+):
     image_name = os.path.basename(img_path)
     board_dir = os.path.join("dataset_cached", image_name.split(".")[0])
     label_path = os.path.join(board_dir, "labels.json")
@@ -230,12 +216,15 @@ def process_image(img_path, annotations, board_lookup, transform, max_attempts=4
                     square_img = transform(square_img)
                 else:
                     square_img = transforms.ToTensor()(square_img)
-                image_label_pairs.append((square_img, int(label_dict.get(key, 12))))  # default to empty
+                image_label_pairs.append(
+                    (square_img, int(label_dict.get(key, 12)))
+                )  # default to empty
             return image_label_pairs
         except Exception as e:
-            print(f"[Warning] Failed to load cached data for {image_name}: {e}")   
-    
-    
+            print(f"[Warning] Failed to load cached data for {image_name}: {e}")
+    elif use_cached_only:
+        return None
+
     image = cv2.imread(img_path)
     if image is None:
         return None
@@ -287,76 +276,116 @@ def main():
     board_lookup = utils.build_board_lookup(annotations)
     # paths = paths[:50]
 
-    # Split dataset
-    train_paths, temp_paths = train_test_split(paths, test_size=0.3, random_state=42)
-    val_paths, test_paths = train_test_split(temp_paths, test_size=0.5, random_state=42)
-
-    # Define transform and device
-    transform = transforms.Compose(
-        [
-            transforms.ToPILImage(),
-            transforms.Resize((64, 64)),
-            transforms.RandomRotation(10),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-        ]
+    load_model = input(
+        "Please type 'y' if you want to load existing model for testing (should be in same directory called 'resnet18_chess_model.pt'), otherwise press 'n': "
     )
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    load_model = load_model.lower() == "y"
 
-    # Step 3: Create datasets and loaders
-    train_dataset = ChessSquareDataset(train_paths, annotations, transform=transform)
-    val_dataset = ChessSquareDataset(val_paths, annotations, transform=transform)
-    test_dataset = ChessSquareDataset(test_paths, annotations, transform=transform)
+    use_cached_only = False
 
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=64)
-    test_loader = DataLoader(test_dataset, batch_size=64)
+    if not load_model:
+        save_model = input(
+            "Please type 'y' if you want to save the model, otherwise press 'n': "
+        )
+        save_model = save_model.lower() == "y"
 
-    # Initialize model, loss, optimizer
-    model = resnet18.ResNet18(num_classes=13).to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+        use_cached_only = input(
+            "Please type 'y' if you want to use the data from the cache only, otherwise press 'n':"
+        )
+        use_cached_only = use_cached_only.lower() == "y"
 
-    # Train model
-    for epoch in range(10):
-        model.train()
-        running_loss = 0.0
-        for inputs, labels in train_loader:
-            inputs = inputs.to(device)
-            labels = labels.to(device)
+        # Split dataset
+        train_paths, temp_paths = train_test_split(
+            paths, test_size=0.3, random_state=42
+        )
+        val_paths, test_paths = train_test_split(
+            temp_paths, test_size=0.5, random_state=42
+        )
 
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
+        # Define transform and device
+        transform = transforms.Compose(
+            [
+                transforms.ToPILImage(),
+                transforms.Resize((64, 64)),
+                transforms.RandomRotation(10),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+            ]
+        )
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        avg_loss = running_loss / len(train_loader)
-        print(f"Epoch {epoch + 1}: Train Loss = {avg_loss:.4f}")
+        # Step 3: Create datasets and loaders
+        train_dataset = ChessSquareDataset(
+            train_paths,
+            annotations,
+            transform=transform,
+            use_cached_only=use_cached_only,
+        )
+        val_dataset = ChessSquareDataset(
+            val_paths, annotations, transform=transform, use_cached_only=use_cached_only
+        )
+        # test_dataset = ChessSquareDataset(
+        #     test_paths,
+        #     annotations,
+        #     transform=transform,
+        #     use_cached_only=use_cached_only,
+        # )
 
-        # Validation loss
-        model.eval()
-        val_loss = 0.0
-        with torch.no_grad():
-            for inputs, labels in val_loader:
+        train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=64)
+        # test_loader = DataLoader(test_dataset, batch_size=64)
+
+        # Initialize model, loss, optimizer
+        model = resnet18.ResNet18(num_classes=13).to(device)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+        # Train model
+        for epoch in range(10):
+            model.train()
+            running_loss = 0.0
+            for inputs, labels in train_loader:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
+
+                optimizer.zero_grad()
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
-                val_loss += loss.item()
-        print(f"Epoch {epoch + 1}: Validation Loss = {val_loss / len(val_loader):.4f}")
+                loss.backward()
+                optimizer.step()
+                running_loss += loss.item()
 
-    # Save Model
-    # model_path = "resnet18_chess_model.pt"
-    # torch.save(model.state_dict(), model_path)
-    # print(f"Model saved to {model_path}")
+            avg_loss = running_loss / len(train_loader)
+            print(f"Epoch {epoch + 1}: Train Loss = {avg_loss:.4f}")
+
+            # Validation loss
+            model.eval()
+            val_loss = 0.0
+            with torch.no_grad():
+                for inputs, labels in val_loader:
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                    val_loss += loss.item()
+            print(
+                f"Epoch {epoch + 1}: Validation Loss = {val_loss / len(val_loader):.4f}"
+            )
+
+        # Save Model
+        if save_model:
+            model_path = "resnet18_chess_model.pt"
+            torch.save(model.state_dict(), model_path)
+            print(f"Model saved to {model_path}")
 
     # Load Model
-    # model = resnet18.ResNet18(num_classes=13)
-    # model.load_state_dict(torch.load("resnet18_chess_model.pt"))
-    # model.eval()
+    if load_model:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = resnet18.ResNet18(num_classes=13)
+        model.load_state_dict(torch.load("resnet18_chess_model.pt"))
+        model.to(device)
+        model.eval()
 
     accuracies = []
     perfect_boards = 0
@@ -380,7 +409,7 @@ def main():
     )
 
 
-def predict_board(model, image, annotations, device, transform, label_inv_map):
+def predict_board(model, image, device, transform, label_inv_map):
     model.eval()
     with torch.no_grad():
         attempt = 0
@@ -393,7 +422,6 @@ def predict_board(model, image, annotations, device, transform, label_inv_map):
             else:
                 break
         else:
-            # raise RuntimeError("Corner detection failed after 10 attempts")
             return None
 
         warped = utils.warp_board(image, corners)
