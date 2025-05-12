@@ -10,7 +10,10 @@ import torch.nn as nn
 import torch
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
-
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor
+import json
 
 # Map piece names to integer labels
 label_map = {
@@ -47,7 +50,7 @@ label_inv_map = {
 
 
 class ChessSquareDataset(Dataset):
-    def __init__(self, image_paths, annotations, transform=None, max_attempts=10):
+    def __init__(self, image_paths, annotations, transform=None, max_attempts=4):
         self.image_paths = image_paths
         self.annotations = annotations
         self.board_lookup = utils.build_board_lookup(annotations)
@@ -57,35 +60,69 @@ class ChessSquareDataset(Dataset):
 
         # Generate (square image, label) pairs across all images
         self.samples = []
-        for img_path in image_paths:
-            try:
-                board_samples = self._process_image(img_path)
-                self.samples.extend(board_samples)
-            except Exception as e:
-                print(f"[Warning] Skipping {img_path}: {e}")
+        i = 0
+
+        # num_workers = 3 # Use N-1 cores
+        # with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        #     futures = [
+        #         executor.submit(
+        #             process_image,
+        #             path,
+        #             self.annotations,
+        #             self.board_lookup,
+        #             self.transform,
+        #             self.max_attempts,
+        #         )
+        #         for path in self.image_paths
+        #     ]
+
+        # for f in as_completed(futures):
+        #     result = f.result()
+        #     if result:
+        #         self.samples.extend(result)
+
+        self.samples = safe_parallel_load(
+            self.image_paths, self.annotations, self.board_lookup, self.transform
+        )
+
+        # for img_path in image_paths:
+        #     # try:
+        #     # print(f"i{i}")
+        #     i += 1
+        #     board_samples = self._process_image(img_path)
+        #     if board_samples is None:
+        #         continue
+        #     self.samples.extend(board_samples)
+        #     # except Exception as e:
+        # print(f"[Warning] Skipping {img_path}: {e}")
 
     def _process_image(self, img_path):
         # Load and rotate image to find corners
         image = cv2.imread(img_path)
         if image is None:
-            raise ValueError(f"Image at path {img_path} not found or unreadable")
+            return None
+            # raise ValueError(f"Image at path {img_path} not found or unreadable")
 
         attempt = 0
         while attempt < self.max_attempts:
-            try:
-                corners = detect_corners.find_corners(utils.cfg, image)
-                break
-            except (detect_corners.RecognitionException, ValueError):
+            corners = detect_corners.find_corners(utils.cfg, image)
+
+            if corners is None or len(corners) != 4:
                 attempt += 1
-                angle = -45 + attempt * 10
+                angle = -22.5 + attempt * 15
                 image = utils.rotate_image(image, angle)
+            else:
+                break
         else:
-            raise RuntimeError(
-                f"Corner detection failed after {self.max_attempts} attempts"
-            )
+            return None
+            # raise RuntimeError(
+            #     f"Corner detection failed after {self.max_attempts} attempts"
+            # )
 
         # Warp and split board
         warped = utils.warp_board(image, corners)
+        if warped is None:
+            return None
         warped = utils.correct_board_orientation(warped)
         squares = utils.split_board_into_squares(
             warped
@@ -122,12 +159,133 @@ class ChessSquareDataset(Dataset):
         return self.samples[idx]
 
 
+def save_squares_and_labels(output_root, image_name, squares, labels):
+    """
+    Saves each square image to a folder and a labels.json file.
+    """
+    board_dir = os.path.join(output_root, image_name.split(".")[0])
+    os.makedirs(board_dir, exist_ok=True)
+
+    label_dict = {}
+    square_keys = utils.get_square_keys_in_order()  # a1 to h8
+
+    for sq_img, key, label_id in zip(squares, square_keys, labels):
+        # Save image as .jpg (denormalize if using ToTensor)
+        if isinstance(sq_img, torch.Tensor):
+            sq_img = sq_img.mul(255).byte().permute(1, 2, 0).cpu().numpy()
+        img_path = os.path.join(board_dir, f"{key}.jpg")
+        cv2.imwrite(img_path, cv2.cvtColor(sq_img, cv2.COLOR_RGB2BGR))
+        label_dict[key] = int(label_id)  # Save int label
+
+    # Save label mapping
+    with open(os.path.join(board_dir, "labels.json"), "w") as f:
+        json.dump(label_dict, f)
+
+
+def safe_parallel_load(paths, annotations, board_lookup, transform):
+    from functools import partial
+    from tqdm import tqdm
+
+    process_fn = partial(
+        process_image,
+        annotations=annotations,
+        board_lookup=board_lookup,
+        transform=transform,
+    )
+
+    results = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(process_fn, path) for path in paths]
+        for f in tqdm(futures):
+            try:
+                res = f.result()
+                if res:
+                    results.extend(res)
+            except Exception as e:
+                print(f"Warning: {e}")
+
+    return results
+
+
+def process_image(img_path, annotations, board_lookup, transform, max_attempts=4):
+    
+    image_name = os.path.basename(img_path)
+    board_dir = os.path.join("dataset_cached", image_name.split(".")[0])
+    label_path = os.path.join(board_dir, "labels.json")
+
+    if os.path.exists(label_path):
+        # Load preprocessed labels
+        try:
+            with open(label_path, "r") as f:
+                label_dict = json.load(f)
+            square_keys = utils.get_square_keys_in_order()
+            image_label_pairs = []
+            for key in square_keys:
+                img_path = os.path.join(board_dir, f"{key}.jpg")
+                if not os.path.exists(img_path):
+                    raise FileNotFoundError(f"{img_path} missing.")
+                square_img = cv2.imread(img_path)
+                square_img = cv2.cvtColor(square_img, cv2.COLOR_BGR2RGB)
+                if transform:
+                    square_img = transform(square_img)
+                else:
+                    square_img = transforms.ToTensor()(square_img)
+                image_label_pairs.append((square_img, int(label_dict.get(key, 12))))  # default to empty
+            return image_label_pairs
+        except Exception as e:
+            print(f"[Warning] Failed to load cached data for {image_name}: {e}")   
+    
+    
+    image = cv2.imread(img_path)
+    if image is None:
+        return None
+
+    attempt = 0
+    while attempt < max_attempts:
+        corners = detect_corners.find_corners(utils.cfg, image)
+        if corners is None or len(corners) != 4:
+            attempt += 1
+            angle = -22.5 + attempt * 15
+            image = utils.rotate_image(image, angle)
+        else:
+            break
+    else:
+        return None
+
+    warped = utils.warp_board(image, corners)
+    if warped is None:
+        return None
+    warped = utils.correct_board_orientation(warped)
+    squares = utils.split_board_into_squares(warped)
+
+    # image_name = os.path.basename(img_path)
+    board = utils.get_board_for_image(image_name, annotations, board_lookup)
+    square_labels = utils.complete_board_labels(board)
+    square_keys = utils.get_square_keys_in_order()
+
+    labels = []
+    image_label_pairs = []
+    for square_img, key in zip(squares, square_keys):
+        label_name = square_labels.get(key, "empty")
+        label = label_map[label_name]
+        labels.append(label)
+        if transform:
+            square_img = transform(square_img)
+        else:
+            square_img = transforms.ToTensor()(square_img)
+        image_label_pairs.append((square_img, label))
+
+    save_squares_and_labels("dataset_cached", image_name, squares, labels)
+
+    return image_label_pairs
+
+
 def main():
     # Load image paths and annotations
     paths = utils.load_chessred_images()
     annotations = utils.load_annotations("annotations.json")
     board_lookup = utils.build_board_lookup(annotations)
-    paths = paths[:50]
+    # paths = paths[:50]
 
     # Split dataset
     train_paths, temp_paths = train_test_split(paths, test_size=0.3, random_state=42)
@@ -190,6 +348,16 @@ def main():
                 val_loss += loss.item()
         print(f"Epoch {epoch + 1}: Validation Loss = {val_loss / len(val_loader):.4f}")
 
+    # Save Model
+    # model_path = "resnet18_chess_model.pt"
+    # torch.save(model.state_dict(), model_path)
+    # print(f"Model saved to {model_path}")
+
+    # Load Model
+    # model = resnet18.ResNet18(num_classes=13)
+    # model.load_state_dict(torch.load("resnet18_chess_model.pt"))
+    # model.eval()
+
     accuracies = []
     perfect_boards = 0
     for path in test_paths:
@@ -199,6 +367,8 @@ def main():
         pred_board = predict_board(
             model, image, annotations, device, transform, label_inv_map
         )
+        if pred_board is None:
+            continue
         acc, is_perfect = evaluate_board_accuracy(pred_board, true_board)
         print(f"{image_name}: Accuracy = {acc:.2%}")
         accuracies.append(acc)
@@ -214,18 +384,21 @@ def predict_board(model, image, annotations, device, transform, label_inv_map):
     model.eval()
     with torch.no_grad():
         attempt = 0
-        while attempt < 10:
-            try:
-                corners = detect_corners.find_corners(utils.cfg, image)
-                break
-            except (detect_corners.RecognitionException, ValueError):
+        while attempt < 4:
+            corners = detect_corners.find_corners(utils.cfg, image)
+            if corners is None or len(corners) != 4:
                 attempt += 1
-                angle = -45 + attempt * 10
+                angle = -22.5 + attempt * 15
                 image = utils.rotate_image(image, angle)
+            else:
+                break
         else:
-            raise RuntimeError("Corner detection failed after 10 attempts")
+            # raise RuntimeError("Corner detection failed after 10 attempts")
+            return None
 
         warped = utils.warp_board(image, corners)
+        if warped is None:
+            return None
         warped = utils.correct_board_orientation(warped)
         squares = utils.split_board_into_squares(warped)
 
