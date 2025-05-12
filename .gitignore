@@ -175,3 +175,6 @@ cython_debug/
 
 # zip files
 *.zip
+
+chessred2k
+# dataset_cached
