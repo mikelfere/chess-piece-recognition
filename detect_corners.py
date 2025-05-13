@@ -1,25 +1,4 @@
-"""Module to perform chessboard localization.
-
-The entire board localization pipeline is implemented end-to-end in this module.
-Use the :meth:`find_corners` to run it.
-
-This module simultaneously acts as a script:
-
-.. code-block:: console
-
-    $ python -m chesscog.corner_detection.detect_corners --help
-    usage: detect_corners.py [-h] [--config CONFIG] file
-
-    Chessboard corner detector.
-
-    positional arguments:
-      file             URI of the input image file
-
-    optional arguments:
-      -h, --help       show this help message and exit
-      --config CONFIG  path to the config file
-"""
-
+# Adapted from: https://github.com/georg-wolflein/chesscog
 from sklearn.metrics.pairwise import pairwise_distances
 from sklearn.cluster import AgglomerativeClustering, DBSCAN
 import cv2
@@ -27,10 +6,6 @@ import numpy as np
 import typing
 from recap import URI, CfgNode as CN
 import matplotlib.pyplot as plt
-
-# from chesscog.core import sort_corner_points
-# from chesscog.core.coordinates import from_homogenous_coordinates, to_homogenous_coordinates
-# from chesscog.core.exceptions import ChessboardNotLocatedException
 
 
 class RecognitionException(Exception):
@@ -133,7 +108,8 @@ def find_corners(cfg: dict, img: np.ndarray) -> np.ndarray:
 
     edges = _detect_edges(cfg["EDGE_DETECTION"], gray)
     lines = _detect_lines(cfg, edges)
-    if lines.shape[0] > 400:
+
+    if lines.shape[0] > 400 or lines.shape[0] == 0:
         # raise ChessboardNotLocatedException("too many lines in the image")
         return None
     all_horizontal_lines, all_vertical_lines = _cluster_horizontal_and_vertical_lines(

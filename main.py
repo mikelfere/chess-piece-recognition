@@ -79,58 +79,6 @@ class ChessSquareDataset(Dataset):
             self.use_cached_only,
         )
 
-    # def _process_image(self, img_path):
-    #     # Load and rotate image to find corners
-    #     image = cv2.imread(img_path)
-    #     if image is None:
-    #         return None
-
-    #     attempt = 0
-    #     while attempt < self.max_attempts:
-    #         corners = detect_corners.find_corners(utils.cfg, image)
-
-    #         if corners is None or len(corners) != 4:
-    #             attempt += 1
-    #             angle = -22.5 + attempt * 15
-    #             image = utils.rotate_image(image, angle)
-    #         else:
-    #             break
-    #     else:
-    #         return None
-
-    #     # Warp and split board
-    #     warped = utils.warp_board(image, corners)
-    #     if warped is None:
-    #         return None
-    #     warped = utils.correct_board_orientation(warped)
-    #     squares = utils.split_board_into_squares(
-    #         warped
-    #     )  # Returns list of 64 square images
-
-    #     # Get labels
-    #     image_name = os.path.basename(img_path)
-    #     board = utils.get_board_for_image(
-    #         image_name, self.annotations, self.board_lookup
-    #     )
-    #     square_labels = utils.complete_board_labels(
-    #         board
-    #     )  # Dict like {'a1': 'white_rook', ...}
-
-    #     # Square order: a8 to h8, ..., a1 to h1 (top to bottom, left to right)
-    #     square_keys = utils.get_square_keys_in_order()  # Assumes top-left is a8
-
-    #     image_label_pairs = []
-    #     for square_img, key in zip(squares, square_keys):
-    #         label_name = square_labels.get(key, "empty")
-    #         label = label_map[label_name]
-    #         if self.transform:
-    #             square_img = self.transform(square_img)
-    #         else:
-    #             square_img = transforms.ToTensor()(square_img)
-    #         image_label_pairs.append((square_img, label))
-
-    #     return image_label_pairs
-
     def __len__(self):
         return len(self.samples)
 
@@ -283,6 +231,22 @@ def main():
 
     use_cached_only = False
 
+    # Split dataset
+    train_paths, temp_paths = train_test_split(paths, test_size=0.3, random_state=42)
+    val_paths, test_paths = train_test_split(temp_paths, test_size=0.5, random_state=42)
+
+    # Define transform and device
+    transform = transforms.Compose(
+        [
+            transforms.ToPILImage(),
+            transforms.Resize((64, 64)),
+            transforms.RandomRotation(10),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+        ]
+    )
+
     if not load_model:
         save_model = input(
             "Please type 'y' if you want to save the model, otherwise press 'n': "
@@ -294,25 +258,6 @@ def main():
         )
         use_cached_only = use_cached_only.lower() == "y"
 
-        # Split dataset
-        train_paths, temp_paths = train_test_split(
-            paths, test_size=0.3, random_state=42
-        )
-        val_paths, test_paths = train_test_split(
-            temp_paths, test_size=0.5, random_state=42
-        )
-
-        # Define transform and device
-        transform = transforms.Compose(
-            [
-                transforms.ToPILImage(),
-                transforms.Resize((64, 64)),
-                transforms.RandomRotation(10),
-                transforms.ColorJitter(brightness=0.2, contrast=0.2),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-            ]
-        )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Step 3: Create datasets and loaders
@@ -325,21 +270,18 @@ def main():
         val_dataset = ChessSquareDataset(
             val_paths, annotations, transform=transform, use_cached_only=use_cached_only
         )
-        # test_dataset = ChessSquareDataset(
-        #     test_paths,
-        #     annotations,
-        #     transform=transform,
-        #     use_cached_only=use_cached_only,
-        # )
 
         train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=64)
-        # test_loader = DataLoader(test_dataset, batch_size=64)
 
         # Initialize model, loss, optimizer
         model = resnet18.ResNet18(num_classes=13).to(device)
         criterion = nn.CrossEntropyLoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+        # best_loss = float("inf")
+        # patience = 2
+        # counter = 0
 
         # Train model
         for epoch in range(10):
@@ -369,9 +311,21 @@ def main():
                     outputs = model(inputs)
                     loss = criterion(outputs, labels)
                     val_loss += loss.item()
+
+            # val_avg = val_loss / len(val_loader)
             print(
                 f"Epoch {epoch + 1}: Validation Loss = {val_loss / len(val_loader):.4f}"
             )
+
+            # if val_avg < best_loss:
+            #     best_loss = val_avg
+            #     counter = 0
+            #     torch.save(model.state_dict(), "best_model.pt")
+            # else:
+            #     counter += 1
+            #     if counter >= patience:
+            #         # print("Early stopping.")
+            #         break
 
         # Save Model
         if save_model:
@@ -393,13 +347,11 @@ def main():
         image = cv2.imread(path)
         image_name = os.path.basename(path)
         true_board = utils.get_board_for_image(image_name, annotations, board_lookup)
-        pred_board = predict_board(
-            model, image, annotations, device, transform, label_inv_map
-        )
+        pred_board = predict_board(model, image, device, transform, label_inv_map)
         if pred_board is None:
             continue
         acc, is_perfect = evaluate_board_accuracy(pred_board, true_board)
-        print(f"{image_name}: Accuracy = {acc:.2%}")
+        # print(f"{image_name}: Accuracy = {acc:.2%}")
         accuracies.append(acc)
         perfect_boards += int(is_perfect)
 
