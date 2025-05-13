@@ -7,4 +7,6 @@ After downloading all the modules, please download the dataset using the this li
 
 After that, you can use python main.py to run the project.
 
-If you want to preprocess the images yourself, it is expected to take 3-6 hours, depending on your machine. The included folder dataset_cached will be used instead to speed up the process. It contains all detected chess boards.
+If you want to preprocess the images yourself, it is expected to take 3-6 hours, depending on your machine. The included folder, dataset_cached will be used instead to speed up the process. It contains all detected chess boards.
+
+A pretrained model is also included in the folder. When you run the model you will be prompted for various things, such as using the dataset_cached directory, saving the model or not, etc. In any case, please make sure you have chessred2k downloaded in the project's directory, since it is required for the test data.
