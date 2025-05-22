@@ -120,8 +120,9 @@ def split_board_into_squares(warped_img):
             x2 = int(round((x + 1) * square_size_x))
             y2 = int(round((y + 1) * square_size_y))
 
+            # avoid going out of bounds
             if x2 > w or y2 > h:
-                continue  # avoid going out of bounds
+                continue  
 
             square = warped_img[y1:y2, x1:x2]
             squares.append(square)
@@ -228,7 +229,7 @@ def correct_board_orientation(warped_board, square_threshold=127):
     avg_brightness = np.mean(bottom_left)
 
     if avg_brightness >= square_threshold:
-        # Square is white — rotate 90° clockwise
+        # if square is white, rotate 90 degrees clockwise
         warped_board = cv2.rotate(warped_board, cv2.ROTATE_90_CLOCKWISE)
         gray = cv2.rotate(gray, cv2.ROTATE_90_CLOCKWISE)
 
@@ -242,7 +243,6 @@ def correct_board_orientation(warped_board, square_threshold=127):
 
     # Rotate if top is brighter (assume white pieces on top)
     if avg_top > avg_bottom:
-        # print("Flipping board to place white side at bottom")
         warped_board = cv2.rotate(warped_board, cv2.ROTATE_180)
 
     return warped_board
@@ -252,9 +252,9 @@ def get_square_keys_in_order():
     return [x + str(y) for y in range(8, 0, -1) for x in "abcdefgh"]
 
 
-# Test functions
+
 def test_chessboard_detection(image_path):
-    # Step 1: Load original image
+    # Load original image
     original = cv2.imread(image_path)
 
     # Show original image
@@ -264,7 +264,7 @@ def test_chessboard_detection(image_path):
     plt.axis("off")
     plt.show()
 
-    # Step 3: Use Wolflein's corner detection
+    # Use Wolflein's corner detection
     corners = find_corners(cfg, original)
 
     if corners is None or len(corners) != 4:
@@ -285,29 +285,29 @@ def test_chessboard_detection(image_path):
     plt.axis("off")
     plt.show()
 
-    # Step 4: Warp board to top-down view
+    # Warp board to top-down view
     warped = warp_board(original, corners)
 
     corrected = correct_board_orientation(warped)
 
-    # Step 5: Split warped board into squares
+    # Split warped board into squares
     squares = split_board_into_squares(corrected)
 
-    # Step 6: Plot warped board
+    # Plot warped board
     plt.figure(figsize=(8, 8))
     plt.title("Warped Board")
     plt.imshow(cv2.cvtColor(warped, cv2.COLOR_BGR2RGB))
     plt.axis("off")
     plt.show()
 
-    # Step 6: Plot warped board
+    # Plot warped board
     plt.figure(figsize=(8, 8))
     plt.title("Corrected Board")
     plt.imshow(cv2.cvtColor(corrected, cv2.COLOR_BGR2RGB))
     plt.axis("off")
     plt.show()
 
-    # Step 7: Plot first 16 squares
+    # Plot first 16 squares
     plt.figure(figsize=(10, 10))
     for i in range(min(16, len(squares))):
         plt.subplot(4, 4, i + 1)

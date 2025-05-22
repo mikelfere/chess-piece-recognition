@@ -2,8 +2,6 @@ import utils
 import resnet18
 import numpy as np
 import detect_corners
-
-# import matplotlib.pyplot as plt
 import cv2
 import os
 from torchvision import transforms
@@ -11,9 +9,6 @@ import torch.nn as nn
 import torch
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
-
-# from concurrent.futures import ProcessPoolExecutor, as_completed
-# import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 import json
 
@@ -260,7 +255,7 @@ def main():
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Step 3: Create datasets and loaders
+        # Create datasets and loaders
         train_dataset = ChessSquareDataset(
             train_paths,
             annotations,
@@ -337,7 +332,9 @@ def main():
     if load_model:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = resnet18.ResNet18(num_classes=13)
-        model.load_state_dict(torch.load("resnet18_chess_model.pt"))
+        model.load_state_dict(
+            torch.load("resnet18_chess_model.pt", map_location=device)
+        )
         model.to(device)
         model.eval()
 
